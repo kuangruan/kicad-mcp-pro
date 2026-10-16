@@ -18,6 +18,7 @@ PLUGIN_RUNTIME = "ipc"
 COMPATIBILITY_SCHEMA = "kicad-mcp-companion-compat.v1"
 EVIDENCE_SCHEMA = "kicad-pcm-release-evidence.v1"
 METADATA_MEMBER = "metadata.json"
+PLUGIN_MANIFEST_MEMBER = "plugins/plugin.json"
 ICON_MEMBER = "resources/icon.png"
 _FIXED_ZIP_TIME = (1980, 1, 1, 0, 0, 0)
 _REGULAR_FILE_MODE = 0o100644
@@ -102,7 +103,7 @@ def _package_members(root: Path, version: str) -> dict[str, bytes]:
             json.dumps(_compatibility(version), indent=2) + "\n"
         ).encode(),
         "plugins/context.py": (plugin_root / "context.py").read_bytes(),
-        "plugins/plugin.json": (plugin_root / "plugin.json").read_bytes(),
+        PLUGIN_MANIFEST_MEMBER: (plugin_root / "plugin.json").read_bytes(),
         "plugins/requirements.txt": (plugin_root / "requirements.txt").read_bytes(),
         "plugins/companion.py": (plugin_root / "companion.py").read_bytes(),
         "plugins/companion_core.py": (plugin_root / "companion_core.py").read_bytes(),
@@ -110,7 +111,7 @@ def _package_members(root: Path, version: str) -> dict[str, bytes]:
         ICON_MEMBER: (root / "docs" / "assets" / "icon-64.png").read_bytes(),
     }
     _validate_icon(members[ICON_MEMBER])
-    manifest = json.loads(members["plugins/plugin.json"])
+    manifest = json.loads(members[PLUGIN_MANIFEST_MEMBER])
     if (
         manifest.get("identifier") != PACKAGE_IDENTIFIER
         or manifest.get("runtime", {}).get("type") != "python"
@@ -199,7 +200,7 @@ def verify_pcm(artifact: Path, checksums: Path) -> None:
                 "plugins/__init__.py",
                 "plugins/compatibility.json",
                 "plugins/context.py",
-                "plugins/plugin.json",
+                PLUGIN_MANIFEST_MEMBER,
                 "plugins/requirements.txt",
                 "plugins/companion.py",
                 "plugins/companion_core.py",

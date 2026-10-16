@@ -63,7 +63,8 @@ def test_backend_status_uses_existing_health_contract() -> None:
 
     ok, message = backend_status(client_factory=factory, compatibility_loader=loader)
 
-    assert ok and "healthy" in message
+    assert ok
+    assert "healthy" in message
     assert factory.call_args.args == ("http://127.0.0.1:3334",)
     assert not factory.call_args.kwargs["auth_token"]
     client.health.assert_called_once_with({"schema_version": "test"})
@@ -78,7 +79,8 @@ def test_bad_backend_is_not_marked_ready() -> None:
         client_factory=lambda *_args, **_kwargs: client,
         compatibility_loader=lambda: {},
     )
-    assert not ok and "reachable" in message
+    assert not ok
+    assert "reachable" in message
 
 
 def test_publish_context_uses_existing_mcp_client_contract(tmp_path: Path) -> None:
@@ -99,11 +101,14 @@ def test_publish_context_uses_existing_mcp_client_contract(tmp_path: Path) -> No
 def test_incompatible_backend_never_publishes_context() -> None:
     client = Mock()
     client.health.return_value = CompanionHealthStatus("backend_incompatible", "Mismatch")
+    snapshot = BoardSummary("board.kicad_pcb", "board", 0, 0, 0)
+    unavailable_factory = lambda *_args, **_kwargs: client  # noqa: E731
+    loader = lambda: {}  # noqa: E731
     with pytest.raises(RuntimeError, match="Mismatch"):
         sync_board_context(
-            BoardSummary("board.kicad_pcb", "board", 0, 0, 0),
-            client_factory=lambda *_args, **_kwargs: client,
-            compatibility_loader=lambda: {},
+            snapshot,
+            client_factory=unavailable_factory,
+            compatibility_loader=loader,
         )
     client.push.assert_not_called()
 
