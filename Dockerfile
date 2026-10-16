@@ -4,7 +4,7 @@ ARG UV_VERSION=0.12.19
 
 FROM ghcr.io/astral-sh/uv:${UV_VERSION}@sha256:ecd4de2f060c64bea0ff8ecb182ddf46ba3fcccdc8a60cfdbaf20d1a047d7437 AS uv-bin
 
-FROM debian:bookworm-slim@sha256:3783cc01769c7b2b1b83a5c5ad96c815348e28ed7da68e2e3687004faa906251 AS kicad-extract
+FROM debian:bookworm-slim@sha256:7c7b2c966bc9ee8cedfeef67e0e279108992c77681fa595db4a9d65c06ccc587 AS kicad-extract
 ARG KICAD_APPIMAGE_URL
 ARG DEBIAN_FRONTEND=noninteractive
 RUN if [ -n "${KICAD_APPIMAGE_URL}" ]; then \
@@ -29,7 +29,7 @@ RUN uv build --wheel --out-dir /dist \
     --format requirements.txt \
     --output-file /dist/requirements.txt
 
-FROM python:3.14.7-slim@sha256:51dafde81dbdb6ebde285137a295cf18a47ca95234fe388a343719cb97305b3d AS builder-kicad10
+FROM python:3.14.8-slim@sha256:a2b82f3c48559aa0a8446d9af49826b6e2b2016f4cd2afabfe6013ec53729170 AS builder-kicad10
 ENV UV_NO_CACHE=1
 COPY --from=uv-bin /uv /usr/local/bin/uv
 WORKDIR /app
@@ -76,7 +76,7 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
 ENTRYPOINT ["kicad-mcp-pro-entrypoint"]
 CMD ["--transport", "streamable-http"]
 
-FROM python:3.14.7-slim@sha256:51dafde81dbdb6ebde285137a295cf18a47ca95234fe388a343719cb97305b3d AS runtime-kicad10
+FROM python:3.14.8-slim@sha256:a2b82f3c48559aa0a8446d9af49826b6e2b2016f4cd2afabfe6013ec53729170 AS runtime-kicad10
 ARG KICAD_MCP_VERSION=0.0.0
 ARG VCS_REF=unknown
 ENV DEBIAN_FRONTEND=noninteractive \
