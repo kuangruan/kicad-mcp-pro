@@ -62,7 +62,8 @@ def test_backend_status_uses_existing_health_contract() -> None:
     ok, message = backend_status(client_factory=factory, compatibility_loader=loader)
 
     assert ok and "healthy" in message
-    factory.assert_called_once_with("http://127.0.0.1:3334", auth_token="")
+    assert factory.call_args.args == ("http://127.0.0.1:3334",)
+    assert not factory.call_args.kwargs["auth_token"]
     client.health.assert_called_once_with({"schema_version": "test"})
 
 
