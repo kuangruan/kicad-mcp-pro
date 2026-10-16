@@ -6,6 +6,8 @@ No writes to the board, automatic shell commands or remote network calls.
 from __future__ import annotations
 
 import os
+import subprocess
+import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -131,3 +133,57 @@ def sync_board_context(
             )
         )
     )
+
+
+def repair_ipc_dependencies(
+    *,
+    python_executable: str | None = None,
+    requirements_path: Path | None = None,
+    in_virtualenv: bool | None = None,
+    runner: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
+) -> None:
+    """Repair only KiCad's active plugin venv after explicit user confirmation.
+
+    KiCad's Python manager sometimes sees packages in user-site during pip
+    resolution but hides that site when running an IPC action. Disabling the
+    user site for this install prevents falsely satisfied dependencies.
+    """
+    is_venv = sys.prefix != sys.base_prefix if in_virtualenv is None else in_virtualenv
+    if not is_venv:
+        raise RuntimeError("IPC dependency repair requires a KiCad-managed virtual environment")
+    requirements = requirements_path or Path(__file__).with_name("requirements.txt")
+    if not requirements.is_file():
+        raise RuntimeError("Plugin requirements are missing; reinstall the KiCad plugin")
+
+    command = [
+        python_executable or sys.executable,
+        "-m",
+        "pip",
+        "install",
+        "--no-input",
+        "--isolated",
+        "--only-binary",
+        ":all:",
+        "--require-virtualenv",
+        "-r",
+        str(requirements),
+    ]
+    environment = os.environ.copy()
+    environment["PYTHONNOUSERSITE"] = "1"
+    environment.pop("PIP_USER", None)
+    try:
+        result = runner(
+            command,
+            env=environment,
+            capture_output=True,
+            text=True,
+            timeout=180,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise RuntimeError("KiCad's private Python dependency repair could not finish") from exc
+    if result.returncode != 0:
+        raise RuntimeError(
+            "KiCad's private Python dependency repair failed. "
+            "Check network access and the plugin log."
+        )

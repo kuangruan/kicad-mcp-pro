@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 import sys
 from pathlib import Path
 from unittest.mock import Mock
@@ -16,6 +17,7 @@ from companion_core import (  # noqa: E402
     backend_status,
     board_summary,
     dashboard_url,
+    repair_ipc_dependencies,
     sync_board_context,
 )
 from context import CompanionHealthStatus  # noqa: E402
@@ -117,3 +119,58 @@ def test_dashboard_is_loopback_only(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_dashboard_custom_local_port(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("KICAD_MCP_URL", "http://localhost:3434")
     assert dashboard_url() == "http://localhost:3434/ui"
+
+
+def test_repair_requires_kicad_private_environment(tmp_path: Path) -> None:
+    requirements = tmp_path / "requirements.txt"
+    requirements.write_text("kicad-python>=0.8,<1.0" + chr(10))
+    runner = Mock()
+    with pytest.raises(RuntimeError, match="virtual environment"):
+        repair_ipc_dependencies(
+            requirements_path=requirements,
+            python_executable="/usr/bin/python3",
+            in_virtualenv=False,
+            runner=runner,
+        )
+    runner.assert_not_called()
+
+
+def test_repair_uses_explicit_private_pip_and_disables_user_site(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    requirements = tmp_path / "requirements.txt"
+    requirements.write_text("kicad-python>=0.8,<1.0" + chr(10))
+    monkeypatch.setenv("PIP_USER", "1")
+    runner = Mock(return_value=subprocess.CompletedProcess(args=[], returncode=0))
+    repair_ipc_dependencies(
+        requirements_path=requirements,
+        python_executable="/private/venv/bin/python",
+        in_virtualenv=True,
+        runner=runner,
+    )
+    args, kwargs = runner.call_args
+    assert args[0][:4] == ["/private/venv/bin/python", "-m", "pip", "install"]
+    assert "--isolated" in args[0]
+    assert "--require-virtualenv" in args[0]
+    assert args[0][-2:] == ["-r", str(requirements)]
+    assert kwargs["env"]["PYTHONNOUSERSITE"] == "1"
+    assert "PIP_USER" not in kwargs["env"]
+    assert kwargs["timeout"] == 180
+    assert kwargs["check"] is False
+
+
+def test_repair_failure_has_no_raw_pip_output_in_user_error(tmp_path: Path) -> None:
+    requirements = tmp_path / "requirements.txt"
+    requirements.write_text("kicad-python>=0.8,<1.0" + chr(10))
+    runner = Mock(
+        return_value=subprocess.CompletedProcess(
+            args=[], returncode=1, stdout="", stderr="secret environment context"
+        )
+    )
+    with pytest.raises(RuntimeError, match="Check network access") as error:
+        repair_ipc_dependencies(
+            requirements_path=requirements,
+            in_virtualenv=True,
+            runner=runner,
+        )
+    assert "secret environment context" not in str(error.value)
