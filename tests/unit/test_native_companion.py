@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import subprocess
 import sys
 from pathlib import Path
 from unittest.mock import Mock
@@ -146,7 +145,8 @@ def test_repair_uses_explicit_private_pip_and_disables_user_site(
     requirements = tmp_path / "requirements.txt"
     requirements.write_text("kicad-python>=0.8,<1.0" + chr(10))
     monkeypatch.setenv("PIP_USER", "1")
-    runner = Mock(return_value=subprocess.CompletedProcess(args=[], returncode=0))
+    runner = Mock()
+    runner.return_value.returncode = 0
     repair_ipc_dependencies(
         requirements_path=requirements,
         python_executable="/private/venv/bin/python",
@@ -167,11 +167,9 @@ def test_repair_uses_explicit_private_pip_and_disables_user_site(
 def test_repair_failure_has_no_raw_pip_output_in_user_error(tmp_path: Path) -> None:
     requirements = tmp_path / "requirements.txt"
     requirements.write_text("kicad-python>=0.8,<1.0" + chr(10))
-    runner = Mock(
-        return_value=subprocess.CompletedProcess(
-            args=[], returncode=1, stdout="", stderr="secret environment context"
-        )
-    )
+    runner = Mock()
+    runner.return_value.returncode = 1
+    runner.return_value.stderr = "secret environment context"
     with pytest.raises(RuntimeError, match="Check network access") as error:
         repair_ipc_dependencies(
             requirements_path=requirements,
