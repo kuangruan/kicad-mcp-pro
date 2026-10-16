@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from kicad_mcp.cli_init import (
+    CLIENT_ZCODE,
     CLIENT_ZED,
     MCP_CLIENT_CONFIGS,
     _generate_mcp_config,
@@ -39,6 +40,12 @@ class TestMcpClientConfigs:
         assert paths["windows"] == r"%APPDATA%\Zed\settings.json"
         assert paths["darwin"] == "~/.config/zed/settings.json"
         assert paths["linux"] == "~/.config/zed/settings.json"
+
+    def test_zcode_uses_platform_appropriate_config_paths(self) -> None:
+        paths = MCP_CLIENT_CONFIGS[CLIENT_ZCODE]
+        assert paths["windows"] == r"%USERPROFILE%\.zcode\cli\config.json"
+        assert paths["darwin"] == "~/.zcode/cli/config.json"
+        assert paths["linux"] == "~/.zcode/cli/config.json"
 
 
 # ---------------------------------------------------------------------------
@@ -87,6 +94,14 @@ class TestGenerateMcpConfig:
         # Should be serializable
         json.dumps(result)
         assert "mcpServers" in result
+
+    def test_zcode_shape_is_nested(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr("kicad_mcp.setup.shutil.which", lambda _: "/custom/bin/uvx")
+        result = _generate_mcp_config("stdio", 3334, client=CLIENT_ZCODE)
+        entry = result["mcp"]["servers"]["kicad-mcp-pro"]
+        assert entry["type"] == "stdio"
+        assert entry["command"] == "/custom/bin/uvx"
+        assert "mcpServers" not in result
 
 
 # ---------------------------------------------------------------------------
@@ -144,6 +159,34 @@ class TestWriteMcpConfig:
             assert "kicad-mcp-pro" in data["mcpServers"]
         finally:
             cli_init._resolve_config_path = orig_resolve
+
+    def test_zcode_merges_nested_and_keeps_other_keys(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import kicad_mcp.cli_init as cli_init
+
+        config_path = tmp_path / "cli" / "config.json"
+        config_path.parent.mkdir(parents=True)
+        config_path.write_text(
+            json.dumps(
+                {
+                    "plugins": {"some-plugin": {"enabled": True}},
+                    "mcp": {"servers": {"other-server": {"command": "npx"}}},
+                }
+            ),
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(cli_init, "_resolve_config_path", lambda client: config_path)
+        monkeypatch.setattr("kicad_mcp.setup.shutil.which", lambda _: None)
+
+        snippet = _generate_mcp_config("stdio", 3334, client=CLIENT_ZCODE)
+        result = _write_mcp_config(CLIENT_ZCODE, snippet)
+
+        assert result is not None
+        data = json.loads(result.read_text(encoding="utf-8"))
+        assert data["plugins"] == {"some-plugin": {"enabled": True}}
+        assert "other-server" in data["mcp"]["servers"]
+        assert "kicad-mcp-pro" in data["mcp"]["servers"]
 
 
 # ---------------------------------------------------------------------------

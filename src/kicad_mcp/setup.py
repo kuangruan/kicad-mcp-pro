@@ -124,6 +124,14 @@ AGENTS: dict[str, AgentInfo] = {
         supports_scope=["user"],
         doc_url="docs/agents/antigravity.md",
     ),
+    "zcode": AgentInfo(
+        key="zcode",
+        display="ZCode",
+        kind="local",
+        format="json",
+        supports_scope=["project", "user"],
+        doc_url="docs/agents/zcode.md",
+    ),
     "chatgpt": AgentInfo(
         key="chatgpt",
         display="ChatGPT Web (remote app)",
@@ -181,6 +189,11 @@ _CONFIG_PATHS: dict[str, dict[Scope, str]] = {
     # ── Antigravity ──
     "antigravity": {
         "user": "~/.gemini/config/mcp_config.json",
+    },
+    # ── ZCode ──
+    "zcode": {
+        "project": ".zcode/config.json",
+        "user": "~/.zcode/cli/config.json",
     },
 }
 
@@ -318,6 +331,16 @@ def _make_stdio_server(command: str, args: list[str], env: dict[str, str]) -> di
     return {"command": command, "args": args, "env": env}
 
 
+def resolve_uvx_command() -> str:
+    """Return an absolute ``uvx`` path when it can be resolved.
+
+    GUI MCP hosts (such as ZCode) may spawn servers without the user's
+    interactive PATH, so ``~/.local/bin`` is not guaranteed to be visible.
+    Falls back to the bare command name when ``uvx`` is not found.
+    """
+    return shutil.which("uvx") or "uvx"
+
+
 def _make_mcp_servers_block(
     server: dict[str, object],
     server_id: str = "kicad",
@@ -393,14 +416,45 @@ def _generate_local_config(
             indent=2,
         )
 
+    if agent_key == "zcode":
+        return _generate_zcode_config(project_dir, env)
+
     if agent_key == "codex":
         return _generate_codex_toml(project_dir, mode)
 
     return json.dumps(_make_mcp_servers_block(server), indent=2)
 
 
+def _generate_zcode_config(project_dir: str, env: dict[str, str]) -> str:
+    """Generate a ZCode config using the nested ``mcp.servers`` block.
+
+    ZCode's configuration schema is strict (unknown keys drop the server) and
+    ``${...}`` templates are not expanded in configuration files, so the
+    command and project directory are written as concrete absolute values.
+    """
+    entry: dict[str, object] = {
+        "type": "stdio",
+        "command": resolve_uvx_command(),
+        "args": ["kicad-mcp-pro"],
+    }
+    zcode_env = dict(env)
+    if project_dir:
+        zcode_env["KICAD_MCP_PROJECT_DIR"] = str(Path(project_dir).expanduser().resolve())
+    else:
+        # Let the server fall back to its working directory / auto-discovery.
+        zcode_env.pop("KICAD_MCP_PROJECT_DIR", None)
+    if zcode_env:
+        entry["env"] = zcode_env
+    return json.dumps({"mcp": {"servers": {"kicad": entry}}}, indent=2)
+
+
 def _generate_http_config(agent_key: str, url: str, env: dict[str, str]) -> str:
     """Generate an HTTP transport config snippet."""
+    if agent_key == "zcode":
+        return json.dumps(
+            {"mcp": {"servers": {"kicad": {"type": "http", "url": url}}}},
+            indent=2,
+        )
     if agent_key == "vscode":
         return json.dumps(
             {
@@ -552,6 +606,14 @@ def _validate_json_agent_entry(data: dict[str, dict[str, object]], agent_key: st
         elif "kicad" not in data.get("mcp", {}):
             # A remote server can be registered under a different name.
             pass
+    elif agent_key == "zcode":
+        mcp_block = data.get("mcp")
+        if not isinstance(mcp_block, dict):
+            issues.append('Missing top-level "mcp" key (expected for ZCode).')
+        elif not isinstance(mcp_block.get("servers"), dict):
+            issues.append('Missing "mcp.servers" key (expected for ZCode).')
+        elif "kicad" not in mcp_block["servers"]:
+            issues.append('Missing "mcp.servers.kicad" entry.')
     else:
         if "mcpServers" not in data:
             issues.append('Missing top-level "mcpServers" key.')
@@ -598,6 +660,32 @@ _JSON_CONFIG_ROOTS: dict[str, str] = {
 }
 
 
+def _merge_zcode_servers(
+    current: dict[str, object], desired: dict[str, object]
+) -> dict[str, object]:
+    """Merge generated servers into the nested ``mcp.servers`` block.
+
+    The ZCode config file also carries unrelated top-level keys (hooks,
+    plugins, skill overrides), so everything outside ``mcp.servers`` is kept.
+    """
+    desired_mcp = desired.get("mcp")
+    desired_servers = desired_mcp.get("servers") if isinstance(desired_mcp, dict) else None
+    if not isinstance(desired_servers, dict):
+        raise ConfigValidationError('Generated config is missing object key "mcp.servers".')
+
+    merged = dict(current)
+    current_mcp = merged.get("mcp", {})
+    if not isinstance(current_mcp, dict):
+        raise ConfigValidationError('Existing key "mcp" must be an object.')
+    current_servers = current_mcp.get("servers", {})
+    if not isinstance(current_servers, dict):
+        raise ConfigValidationError('Existing key "mcp.servers" must be an object.')
+    merged_servers = dict(current_servers)
+    merged_servers.update(desired_servers)
+    merged["mcp"] = {**current_mcp, "servers": merged_servers}
+    return merged
+
+
 def _merge_json_config(existing: str, generated: str, agent_key: str) -> str:
     """Merge only the generated MCP server entries into an existing JSON config."""
     try:
@@ -608,6 +696,10 @@ def _merge_json_config(existing: str, generated: str, agent_key: str) -> str:
         raise ConfigValidationError(msg) from exc
     if not isinstance(current, dict) or not isinstance(desired, dict):
         raise ConfigValidationError("JSON client configuration must be an object.")
+
+    if agent_key == "zcode":
+        merged_zcode = _merge_zcode_servers(current, desired)
+        return json.dumps(merged_zcode, indent=2, ensure_ascii=False) + "\n"
 
     root_key = _JSON_CONFIG_ROOTS.get(agent_key, "mcpServers")
     desired_servers = desired.get(root_key)

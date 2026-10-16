@@ -39,6 +39,7 @@ class TestAgentMetadata:
         assert "vscode" in AGENTS
         assert "claude-desktop" in AGENTS
         assert "antigravity" in AGENTS
+        assert "zcode" in AGENTS
         assert "chatgpt" in AGENTS
         assert "claude-ai" in AGENTS
 
@@ -99,6 +100,12 @@ class TestResolvePath:
         with pytest.raises(ValueError):
             resolve_path("chatgpt", "project")
 
+    def test_zcode_paths(self, tmp_path: Path) -> None:
+        user_path = resolve_path("zcode", "user")
+        assert user_path == (Path.home() / ".zcode" / "cli" / "config.json").resolve()
+        project_path = resolve_path("zcode", "project", tmp_path)
+        assert project_path == (tmp_path / ".zcode" / "config.json").resolve()
+
 
 # ---------------------------------------------------------------------------
 # Config generation
@@ -131,6 +138,43 @@ class TestGenerateConfig:
         data = json.loads(config)
         assert "mcp" in data
         assert data["mcp"]["kicad"]["type"] == "local"
+
+    def test_generate_zcode(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr("kicad_mcp.setup.shutil.which", lambda _: "/custom/bin/uvx")
+        config, fmt = generate_config("zcode", str(tmp_path), "write")
+        assert fmt == "json"
+        entry = json.loads(config)["mcp"]["servers"]["kicad"]
+        assert entry["type"] == "stdio"
+        assert entry["command"] == "/custom/bin/uvx"
+        assert entry["args"] == ["kicad-mcp-pro"]
+        assert entry["env"]["KICAD_MCP_PROJECT_DIR"] == str(tmp_path)
+        assert entry["env"]["KICAD_MCP_PROFILE"] == "build"
+        assert entry["env"]["KICAD_MCP_OPERATING_MODE"] == "write"
+        # ZCode does not expand ${...} templates in configuration files.
+        assert "${" not in config
+
+    def test_generate_zcode_absolute_project_dir(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr("kicad_mcp.setup.shutil.which", lambda _: None)
+        config, _ = generate_config("zcode", "relative/project")
+        entry = json.loads(config)["mcp"]["servers"]["kicad"]
+        assert entry["command"] == "uvx"
+        assert Path(entry["env"]["KICAD_MCP_PROJECT_DIR"]).is_absolute()
+
+    def test_generate_zcode_without_project_dir(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr("kicad_mcp.setup.shutil.which", lambda _: None)
+        config, _ = generate_config("zcode", "")
+        entry = json.loads(config)["mcp"]["servers"]["kicad"]
+        assert "KICAD_MCP_PROJECT_DIR" not in entry.get("env", {})
+        assert entry["env"]["KICAD_MCP_OPERATING_MODE"] == "readonly"
+
+    def test_generate_zcode_http(self) -> None:
+        config, fmt = generate_config(
+            "zcode", "/home/user/project", transport="http", url="http://127.0.0.1:8765/mcp"
+        )
+        assert fmt == "json"
+        entry = json.loads(config)["mcp"]["servers"]["kicad"]
+        assert entry["type"] == "http"
+        assert entry["url"] == "http://127.0.0.1:8765/mcp"
 
     def test_generate_remote_chatgpt(self) -> None:
         config, fmt = generate_config("chatgpt", "", url="https://example.com/mcp")
@@ -276,6 +320,31 @@ class TestWriteConfig:
         path_str, ok = write_config("vscode", "{}", "user")
         assert not ok
 
+    def test_write_zcode_merges_nested_servers(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        config_path = tmp_path / "cli" / "config.json"
+        config_path.parent.mkdir(parents=True)
+        config_path.write_text(
+            json.dumps(
+                {
+                    "hooks": {"enabled": True},
+                    "mcp": {"servers": {"other-server": {"command": "npx"}}},
+                }
+            )
+        )
+        monkeypatch.setattr("kicad_mcp.setup.resolve_path", lambda *args, **kwargs: config_path)
+        monkeypatch.setattr("kicad_mcp.setup.shutil.which", lambda _: None)
+
+        snippet, _ = generate_config("zcode", str(tmp_path))
+        path_str, ok = write_config("zcode", snippet, "project", backup=False)
+
+        assert ok, path_str
+        data = json.loads(config_path.read_text())
+        assert data["hooks"] == {"enabled": True}
+        assert "other-server" in data["mcp"]["servers"]
+        assert "kicad" in data["mcp"]["servers"]
+
 
 # ---------------------------------------------------------------------------
 # Agent config check (doctor integration)
@@ -334,6 +403,19 @@ def test_json_agent_config_validation_preserves_legacy_results(
 
 
 @pytest.mark.parametrize(
+    ("config", "expected"),
+    [
+        ("{}", ['Missing top-level "mcp" key (expected for ZCode).']),
+        ('{"mcp":{}}', ['Missing "mcp.servers" key (expected for ZCode).']),
+        ('{"mcp":{"servers":{"other":{}}}}', ['Missing "mcp.servers.kicad" entry.']),
+        ('{"mcp":{"servers":{"kicad":{}}}}', []),
+    ],
+)
+def test_zcode_config_validation(config: str, expected: list[str]) -> None:
+    assert validate_config(config, "zcode", "json") == expected
+
+
+@pytest.mark.parametrize(
     ("issues", "warning_text"),
     [
         ([], ""),
@@ -369,6 +451,13 @@ class TestCliSetup:
         result = CliRunner().invoke(app, ["setup", "codex"])
         assert result.exit_code == 0, result.output
         assert "[mcp_servers.kicad]" in result.output
+
+    def test_setup_zcode_preview(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr("kicad_mcp.setup.shutil.which", lambda _: None)
+        result = CliRunner().invoke(app, ["setup", "zcode"])
+        assert result.exit_code == 0, result.output
+        assert '"mcp"' in result.output
+        assert "kicad-mcp-pro" in result.output
 
     def test_setup_unknown_agent(self) -> None:
         result = CliRunner().invoke(app, ["setup", "unknown-agent"])

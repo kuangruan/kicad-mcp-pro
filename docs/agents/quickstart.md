@@ -20,6 +20,7 @@ Keep the first run read-only. Switch to write mode only after the project is bac
 | Windsurf | [Windsurf](windsurf.md) | `~/.codeium/windsurf/mcp_config.json` | Confirm the Cascade MCP panel shows the `kicad` server. |
 | Cline | [Cline](cline.md) | Cline MCP settings or `~/.cline/mcp.json` | Confirm the Cline panel lists the server and tools. |
 | OpenCode | [OpenCode](opencode.md) | `opencode.json` | Run `opencode mcp list`. |
+| ZCode | [ZCode](zcode.md) | `~/.zcode/cli/config.json` or `.zcode/config.json` | Settings → MCP shows the `kicad` server connected. |
 
 ## Copy-paste baseline config
 

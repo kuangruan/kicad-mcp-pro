@@ -36,6 +36,9 @@ def test_print_startup_diagnostics_logs_expected_fields(
         "kicad_mcp.server.get_board",
         lambda: (_ for _ in ()).throw(KiCadConnectionError("IPC not reachable")),
     )
+    # Host client detection reads the ambient environment (CLAUDE_CODE, ZCODE_ENV,
+    # ...), so pin it here to keep the captured log record deterministic.
+    monkeypatch.setattr("kicad_mcp.server._detect_client", lambda: None)
     monkeypatch.setattr("kicad_mcp.server.logger.info", fake_info)
 
     _print_startup_diagnostics(get_config())

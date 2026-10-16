@@ -34,12 +34,15 @@ CLIENT_CURSOR = "cursor"
 CLIENT_VSCODE = "vscode"
 CLIENT_WINDSURF = "windsurf"
 CLIENT_ZED = "zed"
+CLIENT_ZCODE = "zcode"
 
 CLIENT_NONE = "none"
 CLIENT_SKIPPED_DISPLAY = "(skipped)"
 
 _ZED_UNIX_CONFIG_PATH = "~/.config/zed/settings.json"
 _ZED_WINDOWS_CONFIG_PATH = r"%APPDATA%\Zed\settings.json"
+_ZCODE_CONFIG_PATH = "~/.zcode/cli/config.json"
+_ZCODE_WINDOWS_CONFIG_PATH = r"%USERPROFILE%\.zcode\cli\config.json"
 _CLAUDE_DESKTOP_DISPLAY_NAME = "Claude Desktop"
 
 # ---------------------------------------------------------------------------
@@ -72,6 +75,11 @@ MCP_CLIENT_CONFIGS: dict[str, dict[str, str]] = {
         "darwin": _ZED_UNIX_CONFIG_PATH,
         "linux": _ZED_UNIX_CONFIG_PATH,
     },
+    CLIENT_ZCODE: {
+        "windows": _ZCODE_WINDOWS_CONFIG_PATH,
+        "darwin": _ZCODE_CONFIG_PATH,
+        "linux": _ZCODE_CONFIG_PATH,
+    },
 }
 
 CLIENT_DISPLAY_NAMES: dict[str, str] = {
@@ -80,6 +88,7 @@ CLIENT_DISPLAY_NAMES: dict[str, str] = {
     CLIENT_VSCODE: "VS Code",
     CLIENT_WINDSURF: "Windsurf",
     CLIENT_ZED: "Zed",
+    CLIENT_ZCODE: "ZCode",
 }
 
 # ---------------------------------------------------------------------------
@@ -105,7 +114,7 @@ def _resolve_config_path(client: str) -> Path | None:
 def _write_mcp_config(client: str, snippet: dict[str, Any]) -> Path | None:
     """Write the MCP config snippet to the client's config file.
 
-    Tries to merge with an existing ``mcpServers`` block when the file already
+    Tries to merge with an existing server block when the file already
     exists.  Returns the config path on success or ``None`` if the path could
     not be resolved.
     """
@@ -119,10 +128,23 @@ def _write_mcp_config(client: str, snippet: dict[str, Any]) -> Path | None:
     else:
         existing = {}
 
-    # Merge the snippet under mcpServers
-    existing_servers = existing.get("mcpServers", {})
-    existing_servers.update(snippet.get("mcpServers", {}))
-    existing["mcpServers"] = existing_servers
+    if client == CLIENT_ZCODE:
+        # ZCode nests servers under mcp.servers and the file carries other
+        # top-level settings, so only that block is merged.
+        mcp_block = existing.get("mcp")
+        if not isinstance(mcp_block, dict):
+            mcp_block = {}
+        servers = mcp_block.get("servers")
+        if not isinstance(servers, dict):
+            servers = {}
+        servers.update(snippet.get("mcp", {}).get("servers", {}))
+        mcp_block["servers"] = servers
+        existing["mcp"] = mcp_block
+    else:
+        # Merge the snippet under mcpServers
+        existing_servers = existing.get("mcpServers", {})
+        existing_servers.update(snippet.get("mcpServers", {}))
+        existing["mcpServers"] = existing_servers
 
     write_target.parent.mkdir(parents=True, exist_ok=True)
     with write_target.open("w", encoding="utf-8") as handle:
@@ -134,13 +156,30 @@ def _generate_mcp_config(
     transport: str,
     port: int,
     version: str = __version__,
+    client: str | None = None,
 ) -> dict[str, Any]:
-    """Generate the ``mcpServers`` snippet for a client config file."""
+    """Generate the client config snippet for a client config file."""
     _ = port
     if transport == TRANSPORT_STDIO:
         args: list[str] = [f"kicad-mcp-pro@{version}"]
     else:
         args = [f"kicad-mcp-pro@{version}", "--transport", transport]
+
+    if client == CLIENT_ZCODE:
+        from kicad_mcp.setup import resolve_uvx_command
+
+        return {
+            "mcp": {
+                "servers": {
+                    "kicad-mcp-pro": {
+                        "type": "stdio",
+                        "command": resolve_uvx_command(),
+                        "args": args,
+                        "env": {},
+                    }
+                }
+            }
+        }
 
     return {
         "mcpServers": {
@@ -210,7 +249,7 @@ def run_wizard(
 
     # ── 4. Config uret ve yaz ────────────────────────────────────
     console.print("\n[bold]4/4 — Config File[/bold]")
-    snippet = _generate_mcp_config(transport, port)
+    snippet = _generate_mcp_config(transport, port, client=client)
 
     json_syntax = Syntax(
         json.dumps(snippet, indent=2, ensure_ascii=False),

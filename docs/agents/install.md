@@ -75,6 +75,7 @@ Choose your agent for detailed setup instructions:
 - [Claude.ai Web](claude-ai.md) — Remote connector (public endpoint required)
 - [ChatGPT Web](chatgpt-app.md) — ChatGPT Developer Mode app (V1: remote only)
 - [Antigravity](antigravity.md) — `~/.gemini/config/mcp_config.json`
+- [ZCode](zcode.md) — `~/.zcode/cli/config.json` or `.zcode/config.json`
 
 ## Environment Variables
 

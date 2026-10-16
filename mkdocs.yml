@@ -114,6 +114,7 @@ nav:
           - OpenCode: agents/opencode.md
           - VS Code Copilot: agents/vscode-copilot.md
           - Windsurf: agents/windsurf.md
+          - ZCode: agents/zcode.md
           - Zed: agents/zed.md
   - KiCad 10:
       - Variants: kicad10/variants.md

@@ -2205,11 +2205,20 @@ _ONBOARDING_MESSAGES: dict[str, str] = {
         "  • 'Route power traces'"
     ),
     "gemini": "Gemini CLI detected.\nSee docs/agents/gemini-cli.md for usage.",
+    "zcode": (
+        "ZCode detected. You can ask:\n"
+        "  • 'Review this board' → pcb_get_board_summary + run_drc\n"
+        "  • 'Check the schematic' → sch_get_symbols + run_erc\n"
+        "  • 'Export Gerbers' → export_gerber + export_drill\n"
+        "See docs/agents/zcode.md for usage."
+    ),
 }
 
 
 def _detect_client() -> str | None:
     """Detect which AI client / agent is connecting based on environment."""
+    if "ZCODE_ENV" in os.environ or "ZCODE_APP_VERSION" in os.environ:
+        return "zcode"
     if "OPENCODE" in os.environ:
         return "opencode"
     if "CLAUDE_CODE" in os.environ:
@@ -3196,6 +3205,21 @@ def _client_config_payload(client: str) -> str:
                 'args = ["kicad-mcp-pro"]',
             ]
         )
+    if client == "zcode":
+        from .setup import resolve_uvx_command
+
+        zcode_payload = {
+            "mcp": {
+                "servers": {
+                    server_name: {
+                        "type": "stdio",
+                        "command": resolve_uvx_command(),
+                        "args": ["kicad-mcp-pro"],
+                    }
+                }
+            }
+        }
+        return json.dumps(zcode_payload, indent=2)
     raise typer.BadParameter(f"Unsupported client: {client}")
 
 
@@ -3204,12 +3228,12 @@ def generate_mcp_config_command(
     client: str = typer.Option(
         ...,
         "--client",
-        help="Client target: claude, cursor, vscode, or codex.",
+        help="Client target: claude, cursor, vscode, codex, or zcode.",
     ),
 ) -> None:
     """Generate a minimal stdio MCP client configuration."""
     normalized = client.strip().casefold()
-    if normalized not in {"claude", "cursor", "vscode", "codex"}:
+    if normalized not in {"claude", "cursor", "vscode", "codex", "zcode"}:
         raise typer.BadParameter(f"Unsupported client: {client}")
     typer.echo(_client_config_payload(normalized))
 

@@ -21,6 +21,7 @@ kiCad-mcp-pro is an MCP server that exposes KiCad PCB design capabilities as too
 | [Windsurf](windsurf.md) | ✅ Supported | ✅ Supported | — | — |
 | [Continue](continue.md) | ✅ Supported | ✅ Supported | — | — |
 | [Zed](zed.md) | ✅ Supported | ✅ Supported | — | — |
+| [ZCode](zcode.md) | ✅ Supported | ✅ Supported | — | — |
 
 ## Quick Start
 
